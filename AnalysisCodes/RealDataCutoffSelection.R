@@ -6,7 +6,7 @@ library(patchwork)
 source('code/XICOR_mod.R')
 source('code/scripts.R')
 
-commonGenes <- read.csv('data/500CommonGenes.csv', row.names = 1)$x
+commonGenes <- read.csv('data/300CommonGenes.csv', row.names = 1)$x
 
 #---------------------
 # Load STRING database
