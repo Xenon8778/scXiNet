@@ -224,10 +224,10 @@ intersectGenes <- Reduce(intersect, list(rownames(so1),rownames(so6),
                                          rownames(so4),rownames(so5),
                                          rownames(so8),rownames(so9)))
 
-# Selecting random 500 common genes
+# Selecting random 300 common genes
 set.seed(0)
 commonGenes <- intersectGenes[sample(1:length(intersectGenes), 300)]
-write.csv(commonGenes,'data/500CommonGenes.csv')
+write.csv(commonGenes,'data/300CommonGenes.csv')
 
 png(paste0('figures/RealData_PBMC.png'),height = 3, width = 12, units = 'in', res = 300)
 umap1+umap3+umap4+umap5+patchwork::plot_layout(ncol = 4)
@@ -240,4 +240,5 @@ message('Plots made...')
 
 message('Loaded samples removed...')
 rm(so1,so3,so4,so5,so8,so9)
+
 
