@@ -46,8 +46,8 @@ Typical use: preprocess data → estimate cutoffs on a reference/simulated datas
 
 ## Requirements
 
-- R (version used: **TODO — add version, e.g. ≥ 4.3**)
-- Key packages (**TODO — confirm against `utils/` and preprocessing scripts**):
+- R (version used: 4.5.2)
+- Key packages:
   - `Seurat` (v5) — preprocessing
   - `doParallel` / `foreach` — parallelized Chatterjee's correlation
   - `XICOR` or custom implementation — Chatterjee's ξ coefficient
@@ -62,7 +62,6 @@ install.packages(c("Seurat", "doParallel", "foreach", "dplyr", "ggplot2"))
 - Real scRNA-seq datasets (PBMC and small intestine epithelial cells) — sourced from GEO; accession numbers listed in Supplementary Table 1 of the paper.
 - Simulated datasets (SERGIO) — generator available at [github.com/PayamDiba/SERGIO](https://github.com/PayamDiba/SERGIO).
 - Ground-truth protein-protein interaction network — [STRING database](https://string-db.org/) v12.0.
-- Ground-truth transcription factor–gene interactions — [TFLink database](https://tflink.net/).
 
 No new data was generated for this study.
 
