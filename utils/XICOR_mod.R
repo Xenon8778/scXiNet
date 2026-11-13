@@ -1,74 +1,32 @@
 library(foreach)
 library(doParallel)
 
-# Function to calculate the Xi correlation matrix with parallel support
-xicor_mpar <- function(x, factor = FALSE, nCores = 1) {
-  # x: Input matrix or data frame.
-  # factor: A logical value. If TRUE, converts factor variables to integers before calculation.
-  # nCores: The number of CPU cores to use for parallel processing. Defaults to 1 (no parallelism).
+xicor_mpar <- function(x, factor = FALSE, nCores = 1, seed = NULL) {
+  if (is.data.frame(x)) {
+    if (factor) x[] <- lapply(x, function(c) if (is.numeric(c)) c else as.integer(factor(c)))
+    x <- as.matrix(x)
+  }
+  stopifnot(is.matrix(x), is.numeric(x) || is.logical(x), ncol(x) > 0, nrow(x) > 1)
+  n <- nrow(x); p <- ncol(x)
+  if (!is.null(seed)) set.seed(seed)
 
-  # --- Input validation and data preparation ---
+  ord <- apply(x, 2, function(v) order(rank(v, ties.method = "random")))  # n x p
+  R   <- apply(x, 2, rank, ties.method = "max")                            # r_i (integer-valued)
+  L   <- apply(-x, 2, rank, ties.method = "max")                           # l_i
+  den <- 2 * colSums(L * (n - L)) / n          # xi = 1 - sum|dr| / den[j]
 
-  # If 'factor' is TRUE, convert non-numeric columns (if they exist) to integers.
-  # This is useful for categorical data, treating factor levels as ordered numbers.
-  if (factor) {
-    if (!is.numeric(x)) x <- apply(x, 2, function(col) as.numeric(factor(col)))
+  row_fun <- function(i) {
+    Ri <- R[ord[, i], , drop = FALSE]
+    1 - colSums(abs(Ri[-1, , drop = FALSE] - Ri[-n, , drop = FALSE])) / den
   }
 
-  # Ensure input is a numeric matrix
-  if (is.data.frame(x)) x <- as.matrix(x)
-  if (!is.matrix(x) || !(is.numeric(x) || is.logical(x))) {
-    stop("Input 'x' must be a numeric matrix or data frame.")
-  }
-  stopifnot(is.atomic(x))
-  ncx <- ncol(x)
-  if (ncx == 0) stop("'x' has no columns.")
-  n <- nrow(x)
-  if (n == 0) stop("'x' has no rows.")
+  r <- if (nCores > 1) {
+    cl <- parallel::makeCluster(nCores); on.exit(parallel::stopCluster(cl))
+    parallel::clusterExport(cl, c("R", "ord", "den", "n"), envir = environment())
+    chunks <- split(seq_len(p), cut(seq_len(p), nCores, labels = FALSE))
+    do.call(rbind, parallel::parLapply(cl, chunks, function(ii) t(vapply(ii, row_fun, numeric(p)))))
+  } else t(vapply(seq_len(p), row_fun, numeric(p)))
 
-  # Precompute ranks and orderings for all columns of x
-  ranks_x <- apply(x, 2, rank, ties.method = "random")
-  orderings_x <- apply(ranks_x, 2, order)
-
-  # Precompute ranks and orderings for all columns of y (which is also x here)
-  ranks_y <- apply(x, 2, rank, ties.method = "max")
-  ranks_y_neg <- apply(-x, 2, rank, ties.method = "max")
-
-  calculate_xicor_pair <- function(i, j, x, ranks_x, orderings_x, ranks_y, ranks_y_neg, n) {
-    ord_i <- orderings_x[, i]
-    fr <- ranks_y[, j] / n
-    gr <- ranks_y_neg[, j] / n
-    fr_ordered <- fr[ord_i]
-    A1 <- sum(abs(fr_ordered[1:(n - 1)] - fr_ordered[2:n])) / (2 * n)
-    CU <- mean(gr * (1 - gr))
-    return(1 - A1 / CU)
-  }
-
-  if (nCores == 1) {
-    r <- matrix(0, nrow = ncx, ncol = ncx)
-    for (i in seq_len(ncx)) {
-      for (j in seq_len(ncx)) {
-        r[i, j] <- calculate_xicor_pair(i, j, x, ranks_x, orderings_x, ranks_y, ranks_y_neg, n)
-      }
-    }
-  } else {
-    # Initialize multicore
-    cl <- makeCluster(nCores)
-    registerDoParallel(cl)
-
-    indices <- expand.grid(i = seq_len(ncx), j = seq_len(ncx))
-    results <- parApply(cl, indices, 1, function(row_indices) {
-      i <- row_indices["i"]
-      j <- row_indices["j"]
-      calculate_xicor_pair(i, j, x, ranks_x, orderings_x, ranks_y, ranks_y_neg, n)
-    })
-
-    r <- matrix(results, nrow = ncx, ncol = ncx, byrow = FALSE)
-
-    stopCluster(cl)
-  }
-
-  rownames(r) <- colnames(x)
-  colnames(r) <- colnames(x)
-  return(r)
+  dimnames(r) <- list(colnames(x), colnames(x))
+  r   # r[i, j] = xi(i -> j)
 }

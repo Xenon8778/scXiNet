@@ -114,7 +114,8 @@ simulate_scrna_with_interactions <- function(n_genes = 100, n_cells = 500, norma
       scdata[g_target] <- scdata[g_target] + abs(rnorm(n_cells, sd = normal_sd)) # Add absolute normal noise
     } else if (i %% 4 == 3) {
       # Exponential interaction: target = exp(source / 15) + noise
-      scdata[g_target] <- exp((scdata[g_source]) / 15) + rnorm(n_cells, sd = normal_sd)
+      scdata[g_target] <- exp((scdata[g_source]/max(scdata[g_source])*5)) + rnorm(n_cells, sd = normal_sd)
+      scdata[g_target][scdata[g_target] < 0] <- 0
     } else if (i %% 4 == 0) {
       # Sinusoidal interaction: target = sin(source / (max(source)/15)) * 5 + 10 + noise
       # Normalizes the source gene expression for the sine wave period.
@@ -124,7 +125,7 @@ simulate_scrna_with_interactions <- function(n_genes = 100, n_cells = 500, norma
     # Convert the modified (continuous) interaction results back to count data.
     # This simulates the effect of the interaction on the underlying true expression,
     # which is then sampled as counts. Negative values are implicitly handled by pmax for trials.
-    lambda <- scdata[[g_target]]
+    lambda <- pmax(scdata[[g_target]], 0)   # rbinom returns NA for negative prob
     trials <- pmax(1000, round(lambda * 10)) # Ensure at least 1000 trials
     prob <- lambda / trials
 
@@ -147,7 +148,7 @@ simulate_scrna_with_interactions <- function(n_genes = 100, n_cells = 500, norma
 # This block performs 10 simulation runs with a consistent set of parameters
 # (500 genes, 1000 cells, 250 interactions) and saves the output.
 
-message("Starting simulation for directed networks with fixed cell count (1000 cells)...")
+message("Starting simulation for nonmonotonic networks with fixed cell count (1000 cells)...")
 # Create a directory to store the simulation results if it doesn't already exist.
 if (!dir.exists('Simulation_Directed')) {
   dir.create('Simulation_Directed')
@@ -155,8 +156,8 @@ if (!dir.exists('Simulation_Directed')) {
 
 for (i in 1:10) {
   # Call the simulation function with specific parameters for this scenario.
-  simulated_data <- simulate_scrna_with_interactions(n_genes = 500, n_cells = 1000, dropout_rate = 0.3,
-                                                     mean_expression = 15, normal_sd = 0.5,
+  simulated_data <- simulate_scrna_with_interactions(n_genes = 500, n_cells = 2000, dropout_rate = 0.2,
+                                                     mean_expression = 15, normal_sd = 0.2,
                                                      n_interactions = 250, seed = i)
   counts_result <- simulated_data$counts
   message(paste0("  Completed iteration ", i))
@@ -168,18 +169,18 @@ for (i in 1:10) {
 # Note: `gpairs_result` will hold the `gpairs` from the *last* simulation iteration (i=10)
 # because the seed for `gpairs` generation within the function is fixed (set.seed(0)).
 gpairs_result <- simulated_data$gpairs
-directed <- vector('logical', length = nrow(gpairs_result))
-# Assign a 'directed' flag based on the interaction type.
-# Linear interactions (i %% 4 == 1) are flagged as FALSE (potentially undirected),
-# while others are TRUE (implying a directed functional relationship).
+nonmonotonic <- vector('logical', length = nrow(gpairs_result))
+# Assign a 'nonmonotonic' flag based on the interaction type.
+# Linear interactions (i %% 4 == 1) are flagged as FALSE (potentially monotonic),
+# while others are TRUE (implying a nonmonotonic functional relationship).
 for (i in 1:nrow(gpairs_result)) {
   if (i %% 4 == 1 | i %% 4 == 3) {
-    directed[i] = FALSE # Linear interactions can be symmetric, hence 'undirected'
+    nonmonotonic[i] = FALSE # Linear interactions can be symmetric, hence 'monotonic'
   } else {
-    directed[i] = TRUE  # Non-linear functions imply a clear input-output direction
+    nonmonotonic[i] = TRUE  # Non-linear functions imply a clear input-output direction
   }
 }
-gpairs_result$directed <- directed # Add the 'directed' column to the ground truth pairs.
+gpairs_result$nonmonotonic <- nonmonotonic # Add the 'nonmonotonic' column to the ground truth pairs.
 
 # Save the ground truth gene interaction pairs to a CSV file.
 write.csv(gpairs_result, 'Simulation_Directed/gt_GRN.csv')
@@ -217,15 +218,15 @@ for (k in nCells_range) {
 # Similar to the previous block, this `gpairs_result` will be consistent due to `set.seed(0)`
 # for interaction pair selection within the function.
 gpairs_result <- simulated_data$gpairs
-directed <- vector('logical', length = nrow(gpairs_result))
+nonmonotonic <- vector('logical', length = nrow(gpairs_result))
 for (i in 1:nrow(gpairs_result)) {
   if (i %% 4 == 1 | i %% 4 == 3) {
-    directed[i] = FALSE
+    nonmonotonic[i] = FALSE
   } else {
-    directed[i] = TRUE
+    nonmonotonic[i] = TRUE
   }
 }
-gpairs_result$directed <- directed
+gpairs_result$nonmonotonic <- nonmonotonic
 # Save the ground truth GRN for the multiple simulation scenario.
 write.csv(gpairs_result, 'Simulation_Directed_multiple/gt_GRN.csv')
 
@@ -236,4 +237,4 @@ message("Multiple simulations across varying cell numbers completed and ground t
 # controlled gene-gene interactions. The simulated data and the associated
 # ground truth interaction networks (`gt_GRN.csv` files) are valuable resources
 # for developing and benchmarking gene regulatory network inference algorithms,
-# particularly those designed for single-cell data and aiming to infer directed relationships.
+# particularly those designed for single-cell data and aiming to infer nonmonotonic relationships.

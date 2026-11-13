@@ -1,6 +1,9 @@
 # Load necessary libraries
 library(XICOR)
 library(dplyr)
+library(igraph)
+library(ggraph)
+library(ggplot2)
 
 # Title: Single-Cell RNA Sequencing Data Simulation with Gene Interactions
 
@@ -114,7 +117,8 @@ simulate_scrna_with_interactions <- function(n_genes = 100, n_cells = 500, norma
       scdata[g_target] <- scdata[g_target] + abs(rnorm(n_cells, sd = normal_sd)) # Add absolute normal noise
     } else if (i %% 4 == 3) {
       # Exponential interaction: target = exp(source / 15) + noise
-      scdata[g_target] <- exp((scdata[g_source]) / 15) + rnorm(n_cells, sd = normal_sd)
+      scdata[g_target] <- exp((scdata[g_source]/max(scdata[g_source])*5)) + rnorm(n_cells, sd = normal_sd)
+      scdata[g_target][scdata[g_target] < 0] <- 0
     } else if (i %% 4 == 0) {
       # Sinusoidal interaction: target = sin(source / (max(source)/15)) * 5 + 10 + noise
       # Normalizes the source gene expression for the sine wave period.
@@ -124,7 +128,7 @@ simulate_scrna_with_interactions <- function(n_genes = 100, n_cells = 500, norma
     # Convert the modified (continuous) interaction results back to count data.
     # This simulates the effect of the interaction on the underlying true expression,
     # which is then sampled as counts. Negative values are implicitly handled by pmax for trials.
-    lambda <- scdata[[g_target]]
+    lambda <- pmax(scdata[[g_target]], 0)
     trials <- pmax(1000, round(lambda * 10)) # Ensure at least 1000 trials
     prob <- lambda / trials
 
@@ -168,73 +172,61 @@ for (i in 1:10) {
 # Note: gpairs_result will be the same across all 'i' iterations because the 'seed' for gpairs
 #       selection within simulate_scrna_with_interactions is hardcoded to 0.
 gpairs_result <- simulated_data$gpairs
-directed <- vector('logical', length = nrow(gpairs_result))
-# Determine if an interaction is "directed" based on its type (modulo 4).
-# Linear (i %% 4 == 1) are considered undirected for this specific labeling,
-# while others are considered directed due to the nature of their functional form.
+nonmonotonic <- vector('logical', length = nrow(gpairs_result))
+# Determine if an interaction is "nonmonotonic" based on its type (modulo 4).
+# Linear (i %% 4 == 1) are considered monotonic for this specific labeling,
+# while others are considered nonmonotonic due to the nature of their functional form.
 for (i in 1:nrow(gpairs_result)) {
   if (i %% 4 == 1) {
-    directed[i] = FALSE # Linear interactions might be treated as undirected in some contexts
+    nonmonotonic[i] = FALSE # Linear interactions might be treated as monotonic in some contexts
   } else {
-    directed[i] = TRUE  # Parabolic, exponential, sinusoidal are inherently directed
+    nonmonotonic[i] = TRUE  # Parabolic, exponential, sinusoidal are inherently nonmonotonic
   }
 }
-gpairs_result$directed <- directed # Add a 'directed' column to the gene pairs data frame
+gpairs_result$nonmonotonic <- nonmonotonic # Add a 'nonmonotonic' column to the gene pairs data frame
 
 # Save the ground truth gene regulatory network (interaction pairs with directionality).
 write.csv(gpairs_result, 'Simulation_scRNAseq/gt_GRN.csv')
 
 message("Single simulation run completed and saved.")
 
+#----
+# Network topology
+#----
+# Ground-truth GRN network built from gt_GRN.csv
+# Columns: source, target, i, type, nonmonotonic
+edges <- read.csv("Simulation_scRNAseq/gt_GRN.csv", stringsAsFactors = FALSE)
 
-# Scenario 2: Multiple simulation runs across varying cell numbers
-# This block performs simulations for a range of cell numbers (500 to 10000, in steps of 500)
-# and for 10 iterations each, saving the results to a different directory.
+types <- c("Linear", "Parabolic", "Exponential", "Sinusoidal")
+edges$type <- types[(edges$X - 1) %% 4 + 1]
+gt_graph <- graph_from_data_frame(edges[, c("V1", "V2", "type", "nonmonotonic")])
 
-message("\nStarting multiple simulation runs across varying cell numbers...")
-# Define the sequence of cell numbers to simulate.
-nCells_range <- seq(500, 10000, 500)
+type_cols <- c(Linear = "#4C78A8", Exponential = "#54A24B",
+               Parabolic = "#E45756", Sinusoidal = "#B279A2")
 
-# Create a directory to store the multiple simulation results if it doesn't exist.
-if (!dir.exists('Simulation_scRNAseq_multiple')) {
-  dir.create('Simulation_scRNAseq_multiple')
-}
+message("Nodes: ", vcount(gt_graph), " | Edges: ", ecount(gt_graph),
+        " | Components: ", components(gt_graph)$no)
+print(table(edges$type))
 
-for (k in nCells_range) {
-  message(paste0("Simulating for nCells = ", k))
-  for (i in 1:10) {
-    # Call the simulation function with varying cell numbers and iteration-specific seeds.
-    simulated_data <- simulate_scrna_with_interactions(n_genes = 100, n_cells = k, dropout_rate = 0.3,
-                                                       mean_expression = 15, normal_sd = 0.2,
-                                                       n_interactions = 50, seed = i)
-    counts_result <- simulated_data$counts
+set.seed(1)
+p <- ggraph(gt_graph, layout = "fr") +
+  geom_edge_link(aes(edge_colour = type), edge_width = 0.6,
+                 arrow = arrow(length = unit(0.06, "in"), type = "closed"),
+                 start_cap = circle(0, "in"), end_cap = circle(0.13, "in")) +
+  geom_node_point(size = 8, shape = 21, fill = "white", colour = "black") +
+  geom_node_text(aes(label = name), size = 3, family = "Arial") +
+  scale_edge_colour_manual(values = type_cols, name = "Interaction") +
+  theme_void(base_family = "Arial") +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 12))
 
-    # Save the simulated count data.
-    write.csv(counts_result, paste0('Simulation_scRNAseq_multiple/counts_', i, '_', k, '.csv'))
-  }
-}
+# Save plot
+ggsave("figures/Simulation_scRNAseq_gt_GRN_network.png", p, width = 8, height = 8,
+       dpi = 300, bg = "white", device = ragg::agg_png)
 
-# Process and save the ground truth gene regulatory network (GRN) for the multiple simulation scenario.
-# This will be identical to the previous 'gt_GRN.csv' since the gene pairs and their
-# assigned directionality are determined by the fixed seed within the function.
-gpairs_result <- simulated_data$gpairs # Takes the gpairs from the very last simulation (k=10000, i=10)
-directed <- vector('logical', length = nrow(gpairs_result))
-for (i in 1:nrow(gpairs_result)) {
-  if (i %% 4 == 1) {
-    directed[i] = FALSE
-  } else {
-    directed[i] = TRUE
-  }
-}
-gpairs_result$directed <- directed
-
-# Save the ground truth gene regulatory network.
-write.csv(gpairs_result, 'Simulation_scRNAseq_multiple/gt_GRN.csv')
-
-message("Multiple simulation runs completed and saved.")
 
 # Further notes:
 # The simulated data can be used for benchmarking gene regulatory network inference methods,
 # especially in the context of single-cell RNA sequencing data.
 # The 'gt_GRN.csv' serves as the ground truth against which inferred networks can be compared.
-# The varying cell numbers allow for assessing method performance with different sample sizes.
